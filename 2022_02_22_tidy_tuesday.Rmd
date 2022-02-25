@@ -1,0 +1,181 @@
+---
+title: "TidyTemplate"
+date: 2022-02-24
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# TidyTuesday
+
+Join the R4DS Online Learning Community in the weekly #TidyTuesday event!
+Every week we post a raw dataset, a chart or article related to that dataset, and ask you to explore the data.
+While the dataset will be “tamed”, it will not always be tidy! As such you might need to apply various R for Data Science techniques to wrangle the data into a true tidy format.
+The goal of TidyTuesday is to apply your R skills, get feedback, explore other’s work, and connect with the greater #RStats community!
+As such we encourage everyone of all skills to participate!
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(tidytuesdayR)
+library(scales)
+library(ggstream)
+
+theme_set(theme_classic())
+```
+
+# Load the weekly Data
+
+Download the weekly data and make available in the `tt` object.
+
+```{r Load}
+
+freedom <- tt_load("2022-02-22")$freedom %>%
+  janitor::clean_names()
+
+freedom
+```
+
+
+# Readme
+
+Take a look at the readme for the weekly data to get insight on the dataset.
+This includes a data dictionary, source, and a link to an article on the data.
+
+```{r Readme, eval = interactive()}
+
+tt
+
+```
+
+
+# Glimpse Data
+
+Take an initial look at the format of the data available.
+
+```{r Glimpse}
+
+freedom %>% 
+  map(glimpse)
+
+```
+
+# Wrangle
+
+Explore the data and process it into a nice format for plotting! Access each dataset by name by using a dollarsign after the `tt` object and then the name of the data set.
+
+```{r Wrangle}
+freedom$region_name <- 
+  countrycode::countrycode(
+    freedom$country,
+    origin = 'country.name',
+    destination = 'un.regionsub.name'
+  )
+ 
+freedom <- freedom %>%
+  mutate(status = case_when(status == 'F' ~ 'Free',
+                            status == 'PF' ~ 'Partially Free',
+                            status == 'NF' ~ 'Not Free'))
+
+freedom$status <- factor(freedom$status, levels = c('Free', 'Partially Free', 'Not Free'))
+
+summarize_region <- function(region) 
+  {
+  summary_region <- 
+  freedom %>%
+  filter(region_name == region) %>%
+  group_by(year,status) %>%
+  summarize(region, number_countries = n())
+  }
+
+ee_summary <- summarize_region('Eastern Europe')
+we_summary <- summarize_region('Western Europe')
+
+southasia_summary <- summarize_region('Southern Asia')
+sea_summary <- summarize_region('South-eastern Asia')
+
+eastasia_summary <- summarize_region('Eastern Asia')
+westasia_summary <- summarize_region('Western Asia')
+
+northafrica_summary <- summarize_region('Northern Africa')
+subafrica_summary <- summarize_region('Sub-Saharan Africa')
+
+northeurope_summary <- summarize_region('Northern Europe')
+southeurope_summary <- summarize_region('Southern Europe')
+
+us_summary <- summarize_region('Northern America')
+latin_summary <- summarize_region('Latin America and the Caribbean')
+```
+
+
+# Visualize
+
+Using your processed dataset, create your unique visualization.
+
+```{r Visualize}
+colors = c('steelblue2', 'mediumpurple', 'tomato2')
+
+freedomComparePlot <- function(data_top, data_bottom, title)
+  {
+  plot1 <-
+  data_top %>%
+  ggplot(aes(x = year, y = number_countries, fill = status)) +
+    geom_stream(type = 'proportional') +
+    scale_fill_manual(values = colors) +
+    labs(title = title,
+         subtitle = 'Tidytuesday WFI',
+         caption = data_top$region) +
+    xlab('') +
+    ylab('') +
+    theme(legend.position = 'none')
+  
+  plot2 <-
+  data_bottom %>%
+  ggplot(aes(x = year, y = number_countries, fill = status)) +
+    geom_stream(type = 'proportional') +
+    scale_fill_manual(values = colors) +
+    labs(caption = data_bottom$region)+
+    xlab('Year') +
+    ylab('Proportion of Countries with Each Status') +
+    theme(legend.position = 'bottom',
+          axis.title.y=element_text(hjust = -0.3))
+  
+  gridExtra::grid.arrange(plot1, plot2, nrow = 2)
+  }
+  
+fplot1 <- freedomComparePlot(us_summary, latin_summary, 'US vs Latin America & Caribbean Proportion of Free Countries')
+fplot2 <- freedomComparePlot(ee_summary, we_summary, 'Western Europe vs Eastern Europe Proportion of Free Countries')
+fplot3 <- freedomComparePlot(northeurope_summary, southeurope_summary, 'Northern vs Southern Europe Proportion of Free Countries')
+fplot4 <- freedomComparePlot(westasia_summary, eastasia_summary, 'West vs East Asia Proportion of Free Countries')
+fplot5 <- freedomComparePlot(southasia_summary, sea_summary, 'South vs Southeast Asia Proportion of Free Countries')
+fplot6 <- freedomComparePlot(northafrica_summary, subafrica_summary, 'Northern vs Sub-Saharan Africa Proportion of Free Countries')
+
+animation::saveGIF(
+  expr = {
+    ani.options(interval = 5)
+    plot(fplot1)
+    plot(fplot2)
+    plot(fplot3)
+    plot(fplot4)
+    plot(fplot5)
+    plot(fplot6)
+  },
+  movie.name = "freedomWars.gif"
+)
+
+```
+
+# Save Image
+
+Save your image for sharing. Be sure to use the `#TidyTuesday` hashtag in your post on twitter! 
+
+```{r}
+
+# This will save your most recent plot
+#ggsave(
+#  filename = "My TidyTuesday Plot.png",
+#  device = "png")
+
+```
