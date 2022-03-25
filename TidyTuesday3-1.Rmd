@@ -1,0 +1,258 @@
+---
+title: "TidyTemplate"
+date: 2022-03-01
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# TidyTuesday
+
+Join the R4DS Online Learning Community in the weekly #TidyTuesday event!
+Every week we post a raw dataset, a chart or article related to that dataset, and ask you to explore the data.
+While the dataset will be “tamed”, it will not always be tidy! As such you might need to apply various R for Data Science techniques to wrangle the data into a true tidy format.
+The goal of TidyTuesday is to apply your R skills, get feedback, explore other’s work, and connect with the greater #RStats community!
+As such we encourage everyone of all skills to participate!
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(tidytuesdayR)
+library(rvest)
+library(maps)
+library(leaflet)
+
+setwd('/Users/SG/Documents/Programming/TidyTuesday')
+url = 'https://statesymbolsusa.org/symbol-official-item/national-us/uncategorized/states-size'
+url_state = "https://raw.githubusercontent.com/vincentarelbundock/countrycode/master/data/custom_dictionaries/us_states.csv"
+
+state_dict = read.csv(url_state, stringsAsFactors=FALSE)
+```
+
+# Load the weekly Data
+
+Download the weekly data and make available in the `tt` object.
+
+```{r Load}
+
+tt <- tt_load("2022-03-01")
+
+```
+
+
+# Readme
+
+Take a look at the readme for the weekly data to get insight on the dataset.
+This includes a data dictionary, source, and a link to an article on the data.
+
+```{r Readme, eval = interactive()}
+
+tt
+
+```
+
+
+# Glimpse Data
+
+Take an initial look at the format of the data available.
+
+```{r Glimpse}
+
+tt %>% 
+  map(glimpse)
+
+```
+
+# Wrangle
+
+Explore the data and process it into a nice format for plotting! Access each dataset by name by using a dollarsign after the `tt` object and then the name of the data set.
+
+```{r Wrangle}
+alt_fuel <- tt$stations
+'%notin%' <- Negate('%in%')
+
+# Select relevant columns and public access
+alt_fuel <-  alt_fuel %>%
+  janitor::clean_names() %>%
+  filter(access_code %in% 'public', state %notin% c('PR', 'ON')) %>%
+  select('fuel_type' = fuel_type_code,
+         street_address,
+         city,
+         state,
+         zip,
+         latitude,
+         longitude)
+
+# Some traditional fuel info
+gas <- readxl::read_xlsx('10333_gasoline_stations_year.xlsx')
+colnames(gas) <- gas[1,]
+gas <- gas[2:52,]
+
+```
+
+
+# Visualize
+
+Using your processed dataset, create your unique visualization.
+
+```{r Visualize Density Map}
+# Scrape area of states https://statesymbolsusa.org/symbol-official-item/national-us/uncategorized/states-size  
+sq_mile <- read_html(url) %>%
+  html_element('table') %>%
+  html_table() %>%
+  select('state' = X2, 'state_area' = X3) %>%
+  slice(-1) %>%
+  mutate('state' = 
+           countrycode::countrycode(state,
+                                    origin = 'state', 
+                                    destination = 'abbreviation',
+                                    custom_dict = state_dict)) %>%
+  add_row(state = 'DC', state_area = '68') %>%
+  mutate(state_area = as.numeric(gsub(",", "", state_area)))
+
+# Join to alt_fuel by state
+alt_fuel <- left_join(alt_fuel, sq_mile, by = 'state')
+
+# Group and calculate station density
+alt_group <- alt_fuel %>%
+  group_by(state, state_area) %>%
+  summarize(count = n()) %>%
+  mutate('station_per_area' = count / state_area) %>%
+  arrange(desc(station_per_area))
+
+# Get US state map data
+state_map <- map_data("state") 
+dc_map <- state_map %>%
+  filter(region == 'district of columbia') %>%
+  mutate('state' = stringr::str_replace_all(region, 'district of columbia', 'DC')) %>%
+  select(!(region | subregion))
+
+# Wrangle to be easy to join to alt_group
+state_map <- state_map %>%
+  filter(region %notin% 'district of columbia') %>%
+  mutate('state' = stringr::str_to_title(region)) %>%
+  mutate('state' = countrycode::countrycode(state,
+                                    origin = 'state', 
+                                    destination = 'abbreviation',
+                                    custom_dict = state_dict)) %>%
+  select(!(region | subregion)) #%>%
+  rbind(dc_map)
+
+# Join to make alt group with shape data  
+shape_alt_group <- inner_join(alt_group, state_map, by = 'state')
+
+# Create density plot
+light_density <- ggplot() +
+  geom_polygon(data = shape_alt_group, 
+               aes(x = long, y = lat, group = group,
+               fill = station_per_area),
+               color = 'black', size = 0.1) +
+  scale_fill_continuous(name = ' Stations \n(Per Mile Squared)',
+                        low = 'white',
+                        high = 'forestgreen',
+                        breaks = scales::pretty_breaks()) +
+  ggthemes::theme_map() +
+  theme(legend.position = "right") +
+  labs(title = 'Density of Public Alternative Fuel Stations in the US',
+       caption = 'TidyTuedsay | Data: https://afdc.energy.gov/data_download/alt_fuel_stations_format')
+
+# Same graph but for gas stations
+gas <- gas %>%
+  filter(State %notin% 'Dist. of Col.') %>%
+  mutate('state' = stringr::str_replace_all(State, 'New Carolina', 'North Carolina')) %>%
+  select(state, stations = '2012') %>%
+  mutate(state = countrycode::countrycode(state,
+                                  origin = 'state', 
+                                  destination = 'abbreviation',
+                                  custom_dict = state_dict)) %>%
+  left_join(sq_mile, by = 'state') %>%
+   mutate(station_area = stations / state_area)
+
+
+shape_gas <- inner_join(gas, state_map, by = 'state')
+
+gas_map <- shape_gas %>% 
+  ggplot() +
+  geom_polygon(data = shape_gas, 
+               aes(x = long, y = lat, group = group,
+               fill = station_area),
+               color = 'black', size = 0.1) +
+  scale_fill_continuous(name = 'Gas Stations \n(Per Mile Squared)',
+                        low = 'white',
+                        high = 'red',
+                        breaks = scales::pretty_breaks()) +
+  ggthemes::theme_map() +
+  theme(legend.position = "right") +
+  labs(title = 'Density of Public Gas Stations in the US',
+       subtitle = 'in the year 2012',
+       caption = 'TidyTuedsay | Data: https://afdc.energy.gov')
+
+
+pdf("compareFuel.pdf")
+gridExtra::grid.arrange(light_density, gas_map, nrow=2)
+dev.off()
+```
+
+
+```{r round 2}
+fuelIcons <- awesomeIconList(
+  BD = makeAwesomeIcon(icon = "fa-solid fa-gas-pump",
+                       library = "fa",
+                       iconColor = "green",
+                       markerColor = "green"),
+  CNG = makeAwesomeIcon(icon = "fa-solid fa-minimize",
+                        library = "fa",
+                        iconColor = "green",
+                        markerColor = "blue")
+)
+
+getColor <- function(alt_fuel) {
+  sapply(alt_fuel$fuel_type, function(fuel_type) {
+    if(fuel_type == 'CNG') {
+      "orange"
+    }
+    else if(fuel_type == 'BD') {
+      "blue"
+    }
+    else if(fuel_type == 'ELEC'){
+      "green"
+    }
+    else if(fuel_type == 'E85'){
+      "yellow"
+    }
+    else if(fuel_type == 'HY'){
+      "purple"
+    }
+    else if(fuel_type == 'LNG'){
+      "cyan"
+    }
+    else {
+      "darkred"
+    }
+  })
+}
+
+
+alt_fuel %>% 
+  filter(fuel_type != 'CNG' & state == 'UT') %>%
+  leaflet() %>%
+  addTiles() %>%
+  addMarkers(~longitude, ~latitude, 
+                    #icons = ~fuel_type,
+                    #color = getColor(),
+                    popup = ~paste(fuel_type, street_address, sep = '<br>'))
+```
+# Save Image
+
+Save your image for sharing. Be sure to use the `#TidyTuesday` hashtag in your post on twitter! 
+
+```{r}
+
+# This will save your most recent plot
+ggsave(
+  filename = "3-1DensityMap.png",
+  device = "png")
+
+```

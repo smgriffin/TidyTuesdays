@@ -1,0 +1,133 @@
+---
+title: "Tidy Tuesday"
+date: 2022-03-15
+output: html_document
+---
+
+# TidyTuesday
+
+Join the R4DS Online Learning Community in the weekly #TidyTuesday event!
+Every week we post a raw dataset, a chart or article related to that dataset, and ask you to explore the data.
+While the dataset will be “tamed”, it will not always be tidy! As such you might need to apply various R for Data Science techniques to wrangle the data into a true tidy format.
+The goal of TidyTuesday is to apply your R skills, get feedback, explore other’s work, and connect with the greater #RStats community!
+As such we encourage everyone of all skills to participate!
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(tidytuesdayR)
+
+```
+
+# Load the weekly Data
+
+Download the weekly data and make available in the `tt` object.
+
+```{r Load}
+
+tt <- tt_load("2022-03-15")
+
+```
+
+
+# Readme
+
+Take a look at the readme for the weekly data to get insight on the dataset.
+This includes a data dictionary, source, and a link to an article on the data.
+
+```{r Readme, eval = interactive()}
+
+cran <- tt$cran
+bioc <- tt$bioc
+
+```
+
+
+# Glimpse Data
+
+Take an initial look at the format of the data available.
+
+```{r Glimpse}
+
+tt %>% 
+  map(glimpse)
+
+```
+
+# Wrangle
+
+Explore the data and process it into a nice format for plotting! Access each dataset by name by using a dollarsign after the `tt` object and then the name of the data set.
+
+```{r Wrangle}
+cran <- cran %>%
+  group_by(package) %>%
+  summarise_all(last) %>%
+  select(-c(version, date))
+
+bioc <- bioc %>%
+  group_by(package) %>%
+  summarise_all(last) %>%
+  select(-date)
+
+pct_summary <- function(data){
+    c('rmd' = (sum(data$rmd)/nrow(data)*100),
+      'rnw' =  (sum(data$rnw)/nrow(data))*100,
+      'missing' = 100 - ((sum(data$rmd)/nrow(data)*100) + (sum(data$rnw)/nrow(data))*100))
+}
+
+plot <- as_tibble(rbind(c('bioc',-pct_summary(bioc)), c('cran',pct_summary(cran)))) %>%
+  pivot_longer(cols = c(rmd, rnw, missing),
+               names_to = "type",
+               values_to = "total"
+    ) %>%
+  rename('maintainer' = V1)
+
+plot$total <- as.numeric(plot$total)
+
+color1<- c('#219ebc', '#ffb703')
+color2 <- c('#2a9d8f', '#e76f51')
+color3 <- c('#98D9C2', '#F19A3E')
+
+```
+
+
+# Visualize
+
+Using your processed dataset, create your unique visualization.
+
+```{r Visualize}
+
+p <- plot %>%
+  ggplot(aes(x = type, y = total, group = maintainer, fill = maintainer)) +
+  geom_bar(stat = 'identity', width = .75) +
+  coord_flip() +
+  scale_x_discrete(labels = c("No Vignette", 'RMarkdown', 'Sweave')) +
+  scale_y_continuous(labels = abs(seq(-60, 60, 15)), breaks = seq(-60, 60, 15), limits = c(-60,60)) +
+  labs(title = 'Percentage of Vignettes Written in Sweave and RMarkdown',
+       subtitle = 'For Cran and Bioconductor package maintainers',
+       caption = 'TidyTuesday 3/15 | sg') +
+  xlab('') +
+  ylab('') +
+  theme(legend.position = 'bottom') +
+  theme_bw() +
+  scale_fill_manual(values = color2)
+
+  
+
+p
+```
+
+# Save Image
+
+Save your image for sharing. Be sure to use the `#TidyTuesday` hashtag in your post on twitter! 
+
+```{r}
+
+# This will save your most recent plot
+ggsave(
+  filename = "sgTidyTuesday3-15.png",
+  device = "png")
+
+```
